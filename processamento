@@ -1,0 +1,210 @@
+import pandas as pd
+import re
+
+arquivo_dados = (
+    r"C:\Users\DELL\Downloads\PNADC_022026"
+    r"\PNADC_022026.txt"
+)
+
+arquivo_input = (
+    r"C:\Users\DELL\Downloads\Dicionario_e_input_20221031"
+    r"\input_PNADC_trimestral.sas"
+)
+
+arquivo_saida = (
+    r"C:\Users\DELL\Downloads"
+    r"\PNADC_022026_amostra_2000.xlsx"
+)
+
+variaveis = []
+posicoes = []
+tamanhos = []
+
+with open(arquivo_input, "r", encoding="latin1") as arquivo:
+
+    for linha in arquivo:
+
+        padrao = re.search(
+            r'@(\d+)\s+([A-Za-z0-9_]+)\s+\$?(\d+)\.',
+            linha
+        )
+
+        if padrao:
+
+            posicoes.append(int(padrao.group(1)))
+            variaveis.append(padrao.group(2))
+            tamanhos.append(int(padrao.group(3)))
+
+colspecs = [
+    (p - 1, p - 1 + t)
+    for p, t in zip(posicoes, tamanhos)
+]
+
+print("=" * 70)
+print("LENDO MICRODADOS")
+print("=" * 70)
+dados = pd.read_fwf(
+    arquivo_dados,
+    colspecs=colspecs,
+    names=variaveis,
+    encoding="latin1",
+    dtype=str,
+    keep_default_na=False
+)
+
+print(f"Total de registros: {len(dados):,}")
+
+# Retirar espaços
+for coluna in dados.columns:
+    dados[coluna] = dados[coluna].str.strip()
+
+amostra = dados[
+    [
+        "UF",
+        "V2009",     # Idade
+        "V2010",     # Cor/Raça
+        "V3003A",    # Curso que frequenta
+        "VD4019"     # Renda
+    ]
+].copy()
+
+print(
+    f"Registros disponíveis: "
+    f"{len(amostra):,}"
+)
+
+amostra = amostra[
+    (amostra["UF"] != "") &
+    (amostra["V2009"] != "") &
+    (amostra["V2010"] != "") &
+    (amostra["V3003A"] != "") &
+    (amostra["VD4019"] != "")
+].copy()
+
+print(
+    f"Registros completos: "
+    f"{len(amostra):,}"
+)
+
+mapa_cor = {
+    "1": "Branca",
+    "2": "Preta",
+    "3": "Amarela",
+    "4": "Parda",
+    "5": "Indígena"
+}
+
+amostra["Cor/Raça"] = (
+    amostra["V2010"]
+    .map(mapa_cor)
+)
+
+mapa_ensino = {
+    "02": "Alfabetização de jovens e adultos",
+    "04": "Ensino fundamental",
+    "05": "Ensino médio",
+    "06": "EJA/supletivo do ensino fundamental",
+    "07": "EJA/supletivo do ensino médio",
+    "08": "Superior - graduação",
+    "09": "Especialização",
+    "10": "Mestrado",
+    "11": "Doutorado"
+}
+
+amostra["Ensino"] = (
+    amostra["V3003A"]
+    .map(mapa_ensino)
+)
+
+amostra = amostra[
+    amostra["Cor/Raça"].notna() &
+    amostra["Ensino"].notna()
+].copy()
+
+print(
+    f"Registros após validação: "
+    f"{len(amostra):,}"
+)
+
+amostra["Renda_num"] = pd.to_numeric(
+    amostra["VD4019"],
+    errors="coerce"
+)
+
+amostra = amostra[
+    amostra["Renda_num"].notna()
+].copy()
+
+print(
+    f"Registros com renda válida: "
+    f"{len(amostra):,}"
+)
+
+amostra = amostra[
+    amostra["Renda_num"] <= 20000
+].copy()
+
+print(
+    f"Registros com renda até R$ 20.000: "
+    f"{len(amostra):,}"
+)
+
+if len(amostra) < 2000:
+
+    print(
+        "\nERRO: existem menos de 2.000 "
+        "pessoas com renda até R$ 20.000."
+    )
+
+else:
+
+    amostra = amostra.sample(
+        n=2000,
+        random_state=42,
+        replace=False
+    ).copy()
+
+resultado = pd.DataFrame({
+    "Pessoa": range(1, len(amostra) + 1),
+    "UF": amostra["UF"],
+    "Idade": amostra["V2009"],
+    "Cor/Raça": amostra["Cor/Raça"],
+    "Ensino": amostra["Ensino"],
+    "Renda": amostra["Renda_num"]
+})
+
+resultado.to_excel(
+    arquivo_saida,
+    index=False
+)
+
+print("\n" + "=" * 70)
+print("PLANILHA GERADA COM SUCESSO")
+print("=" * 70)
+
+print(
+    f"\nArquivo salvo em:\n"
+    f"{arquivo_saida}"
+)
+
+print(
+    f"\nQuantidade de pessoas: "
+    f"{len(resultado):,}"
+)
+
+print(
+    f"Maior renda da amostra: "
+    f"R$ {resultado['Renda'].max():,.2f}"
+)
+
+print("\nPRIMEIRAS 20 PESSOAS:\n")
+
+print(
+    resultado.head(20).to_string(
+        index=False
+    )
+)
+
+print("\n" + "=" * 70)
+print("FIM")
+print("=" * 70)
